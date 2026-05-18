@@ -132,10 +132,11 @@ export default function SnakePage() {
       const newDir = map[e.key];
       if (!newDir) return;
       e.preventDefault();
-      if (statusRef.current === "idle" || statusRef.current === "dead") {
+      if (statusRef.current === "idle") {
         startGame();
         return;
       }
+      if (statusRef.current === "dead") return;
       if (newDir !== OPPOSITE[dirRef.current]) {
         dirRef.current = newDir;
         setDir(newDir);
@@ -162,10 +163,8 @@ export default function SnakePage() {
 
   // Mobile controls
   const swipe = (d: Dir) => {
-    if (statusRef.current === "idle" || statusRef.current === "dead") {
-      startGame();
-      return;
-    }
+    if (statusRef.current === "idle") { startGame(); return; }
+    if (statusRef.current === "dead") return;
     if (d !== OPPOSITE[dirRef.current]) {
       dirRef.current = d;
       setDir(d);
@@ -241,20 +240,52 @@ export default function SnakePage() {
 
           {/* Overlay: idle / dead */}
           {status !== "running" && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 backdrop-blur-sm">
-              {status === "dead" && (
-                <p className="text-red-400 font-bold text-2xl mb-1">Игра окончена</p>
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/55 backdrop-blur-sm px-6">
+              {status === "dead" ? (
+                <>
+                  <p className="text-red-400 font-bold text-2xl mb-1">Игра окончена</p>
+                  <p className="text-white/60 text-sm mb-4">Счёт: {score}</p>
+                  {!saved ? (
+                    <div className="w-full flex flex-col gap-2 mb-4">
+                      <input
+                        type="text"
+                        placeholder="Введите имя для рекорда"
+                        value={playerName}
+                        onChange={(e) => setPlayerName(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && saveScore()}
+                        maxLength={20}
+                        autoFocus
+                        className="w-full px-3 py-2 rounded-lg bg-white/10 border border-white/20 text-white placeholder-white/40 text-sm focus:outline-none focus:border-green-400 text-center"
+                      />
+                      <button
+                        onClick={saveScore}
+                        disabled={saving || !playerName.trim()}
+                        className="w-full py-2 bg-green-500 hover:bg-green-400 disabled:opacity-50 text-white font-semibold rounded-lg transition-all"
+                      >
+                        {saving ? "Сохраняем..." : "Сохранить результат"}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-green-300 text-sm mb-4">Результат сохранён!</p>
+                  )}
+                  <button
+                    onClick={startGame}
+                    className="px-6 py-2 bg-white/20 hover:bg-white/30 text-white font-bold rounded-xl transition-all active:scale-95 border border-white/20"
+                  >
+                    Играть снова
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={startGame}
+                    className="px-6 py-2 bg-green-500 hover:bg-green-400 text-white font-bold rounded-xl transition-all active:scale-95"
+                  >
+                    Начать игру
+                  </button>
+                  <p className="text-white/30 text-xs mt-3">или нажмите любую стрелку</p>
+                </>
               )}
-              {status === "dead" && (
-                <p className="text-white/60 text-sm mb-4">Счёт: {score}</p>
-              )}
-              <button
-                onClick={startGame}
-                className="px-6 py-2 bg-green-500 hover:bg-green-400 text-white font-bold rounded-xl transition-all active:scale-95"
-              >
-                {status === "idle" ? "Начать игру" : "Играть снова"}
-              </button>
-              <p className="text-white/30 text-xs mt-3">или нажмите любую стрелку</p>
             </div>
           )}
         </div>
@@ -269,28 +300,6 @@ export default function SnakePage() {
           <button onClick={() => swipe("RIGHT")} className="py-2 bg-white/10 hover:bg-white/20 rounded-lg text-white text-lg active:scale-95 transition-all">→</button>
         </div>
 
-        {/* Save score */}
-        {showName && (
-          <div className="mt-4 w-full flex gap-2">
-            <input
-              type="text"
-              placeholder="Ваше имя"
-              value={playerName}
-              onChange={(e) => setPlayerName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && saveScore()}
-              maxLength={20}
-              className="flex-1 px-3 py-2 rounded-lg bg-white/10 border border-white/20 text-white placeholder-white/40 text-sm focus:outline-none focus:border-green-400"
-            />
-            <button
-              onClick={saveScore}
-              disabled={saving || !playerName.trim()}
-              className="px-4 py-2 bg-green-500 hover:bg-green-400 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-all"
-            >
-              {saving ? "..." : "Сохранить"}
-            </button>
-          </div>
-        )}
-        {saved && <p className="mt-2 text-green-300 text-sm">Результат сохранён!</p>}
 
         {/* Leaderboard button */}
         <button
