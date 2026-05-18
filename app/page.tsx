@@ -1,65 +1,158 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useState, useEffect, useCallback } from "react";
+
+const SIZE = 4;
+const TOTAL = SIZE * SIZE;
+
+function createSolved(): number[] {
+  return Array.from({ length: TOTAL }, (_, i) => (i + 1) % TOTAL);
+}
+
+function shuffle(tiles: number[]): number[] {
+  const arr = [...tiles];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  const blank = arr.indexOf(0);
+  if (!isSolvable(arr, blank)) {
+    if (blank !== 0 && blank !== 1) {
+      [arr[0], arr[1]] = [arr[1], arr[0]];
+    } else {
+      [arr[2], arr[3]] = [arr[3], arr[2]];
+    }
+  }
+  return arr;
+}
+
+function isSolvable(arr: number[], blankIndex: number): boolean {
+  let inversions = 0;
+  const flat = arr.filter((x) => x !== 0);
+  for (let i = 0; i < flat.length; i++)
+    for (let j = i + 1; j < flat.length; j++)
+      if (flat[i] > flat[j]) inversions++;
+  const blankFromBottom = SIZE - Math.floor(blankIndex / SIZE);
+  if (SIZE % 2 === 1) return inversions % 2 === 0;
+  if (blankFromBottom % 2 === 0) return inversions % 2 === 1;
+  return inversions % 2 === 0;
+}
+
+function isSolved(tiles: number[]): boolean {
+  return tiles.every((t, i) => t === (i + 1) % TOTAL);
+}
+
+export default function PuzzlePage() {
+  const [tiles, setTiles] = useState<number[]>(createSolved);
+  const [moves, setMoves] = useState(0);
+  const [won, setWon] = useState(false);
+  const [time, setTime] = useState(0);
+  const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setTime((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [running]);
+
+  const startNew = useCallback(() => {
+    setTiles(shuffle(createSolved()));
+    setMoves(0);
+    setWon(false);
+    setTime(0);
+    setRunning(true);
+  }, []);
+
+  useEffect(() => {
+    startNew();
+  }, [startNew]);
+
+  const move = useCallback(
+    (index: number) => {
+      if (won) return;
+      const blank = tiles.indexOf(0);
+      const row = Math.floor(index / SIZE);
+      const col = index % SIZE;
+      const bRow = Math.floor(blank / SIZE);
+      const bCol = blank % SIZE;
+      const adjacent =
+        (Math.abs(row - bRow) === 1 && col === bCol) ||
+        (Math.abs(col - bCol) === 1 && row === bRow);
+      if (!adjacent) return;
+      const next = [...tiles];
+      [next[blank], next[index]] = [next[index], next[blank]];
+      setTiles(next);
+      setMoves((m) => m + 1);
+      if (isSolved(next)) {
+        setWon(true);
+        setRunning(false);
+      }
+    },
+    [tiles, won]
+  );
+
+  const fmt = (s: number) =>
+    `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="min-h-screen bg-gradient-to-br from-indigo-950 via-purple-900 to-indigo-900 flex flex-col items-center justify-center p-4">
+      <h1 className="text-4xl font-bold text-white mb-2 tracking-tight">
+        Пятнашки
+      </h1>
+      <p className="text-purple-300 mb-6 text-sm">
+        Расставьте плитки по порядку от 1 до 15
+      </p>
+
+      <div className="flex gap-8 mb-6 text-center">
+        <div>
+          <div className="text-2xl font-bold text-white">{moves}</div>
+          <div className="text-purple-400 text-xs uppercase tracking-widest">Ходов</div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+        <div>
+          <div className="text-2xl font-bold text-white">{fmt(time)}</div>
+          <div className="text-purple-400 text-xs uppercase tracking-widest">Время</div>
         </div>
-      </main>
-    </div>
+      </div>
+
+      <div
+        className="grid gap-2 p-3 bg-indigo-950/60 rounded-2xl shadow-2xl border border-indigo-800/40"
+        style={{ gridTemplateColumns: `repeat(${SIZE}, 1fr)` }}
+      >
+        {tiles.map((tile, i) => (
+          <button
+            key={i}
+            onClick={() => move(i)}
+            disabled={tile === 0}
+            className={`
+              w-16 h-16 sm:w-20 sm:h-20 rounded-xl font-bold text-xl sm:text-2xl
+              transition-all duration-100 select-none
+              ${
+                tile === 0
+                  ? "bg-transparent cursor-default"
+                  : "bg-gradient-to-br from-violet-500 to-purple-700 text-white shadow-lg hover:from-violet-400 hover:to-purple-600 hover:scale-105 active:scale-95 cursor-pointer"
+              }
+            `}
+          >
+            {tile !== 0 ? tile : ""}
+          </button>
+        ))}
+      </div>
+
+      {won && (
+        <div className="mt-6 px-6 py-4 bg-green-500/20 border border-green-400/40 rounded-2xl text-center">
+          <div className="text-2xl font-bold text-green-300">Победа!</div>
+          <div className="text-green-400 text-sm mt-1">
+            {moves} ходов · {fmt(time)}
+          </div>
+        </div>
+      )}
+
+      <button
+        onClick={startNew}
+        className="mt-6 px-8 py-3 bg-violet-600 hover:bg-violet-500 active:scale-95 text-white font-semibold rounded-xl transition-all shadow-lg"
+      >
+        Новая игра
+      </button>
+    </main>
   );
 }
