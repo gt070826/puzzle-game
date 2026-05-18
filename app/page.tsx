@@ -1,282 +1,328 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 
-const SIZE = 4;
-const TOTAL = SIZE * SIZE;
+const COLS = 20;
+const ROWS = 20;
+const CELL = 24;
+const TICK = 120;
 
-type LeaderboardEntry = {
-  id: number;
-  name: string;
-  moves: number;
-  time_seconds: number;
+type Point = { x: number; y: number };
+type Dir = "UP" | "DOWN" | "LEFT" | "RIGHT";
+
+type LeaderboardEntry = { id: number; name: string; moves: number };
+
+const OPPOSITE: Record<Dir, Dir> = {
+  UP: "DOWN", DOWN: "UP", LEFT: "RIGHT", RIGHT: "LEFT",
 };
 
-function createSolved(): number[] {
-  return Array.from({ length: TOTAL }, (_, i) => (i + 1) % TOTAL);
+function randomFood(snake: Point[]): Point {
+  let p: Point;
+  do {
+    p = { x: Math.floor(Math.random() * COLS), y: Math.floor(Math.random() * ROWS) };
+  } while (snake.some((s) => s.x === p.x && s.y === p.y));
+  return p;
 }
-
-function shuffle(tiles: number[]): number[] {
-  const arr = [...tiles];
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  const blank = arr.indexOf(0);
-  if (!isSolvable(arr, blank)) {
-    if (blank !== 0 && blank !== 1) [arr[0], arr[1]] = [arr[1], arr[0]];
-    else [arr[2], arr[3]] = [arr[3], arr[2]];
-  }
-  return arr;
-}
-
-function isSolvable(arr: number[], blankIndex: number): boolean {
-  let inversions = 0;
-  const flat = arr.filter((x) => x !== 0);
-  for (let i = 0; i < flat.length; i++)
-    for (let j = i + 1; j < flat.length; j++)
-      if (flat[i] > flat[j]) inversions++;
-  const blankFromBottom = SIZE - Math.floor(blankIndex / SIZE);
-  if (SIZE % 2 === 1) return inversions % 2 === 0;
-  if (blankFromBottom % 2 === 0) return inversions % 2 === 1;
-  return inversions % 2 === 0;
-}
-
-function isSolved(tiles: number[]): boolean {
-  return tiles.every((t, i) => t === (i + 1) % TOTAL);
-}
-
-const fmt = (s: number) =>
-  `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
 const BG_URL =
   "https://images.unsplash.com/photo-1557841066-eefe351308b3?fm=jpg&q=80&w=1920&auto=format&fit=crop";
 
-export default function PuzzlePage() {
-  const [tiles, setTiles] = useState<number[]>(createSolved);
-  const [moves, setMoves] = useState(0);
-  const [won, setWon] = useState(false);
-  const [time, setTime] = useState(0);
-  const [running, setRunning] = useState(false);
+export default function SnakePage() {
+  const [snake, setSnake] = useState<Point[]>([{ x: 10, y: 10 }]);
+  const [food, setFood] = useState<Point>({ x: 5, y: 5 });
+  const [dir, setDir] = useState<Dir>("RIGHT");
+  const [score, setScore] = useState(0);
+  const [best, setBest] = useState(0);
+  const [status, setStatus] = useState<"idle" | "running" | "dead">("idle");
 
-  const [showNameInput, setShowNameInput] = useState(false);
+  const [showName, setShowName] = useState(false);
   const [playerName, setPlayerName] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
+
+  const dirRef = useRef<Dir>("RIGHT");
+  const snakeRef = useRef<Point[]>([{ x: 10, y: 10 }]);
+  const foodRef = useRef<Point>({ x: 5, y: 5 });
+  const statusRef = useRef<"idle" | "running" | "dead">("idle");
+  const scoreRef = useRef(0);
 
   const fetchLeaderboard = useCallback(async () => {
     const { data } = await supabase
       .from("leaderboard")
       .select("*")
-      .order("moves", { ascending: true })
-      .order("time_seconds", { ascending: true })
+      .order("moves", { ascending: false })
       .limit(10);
     if (data) setLeaderboard(data);
   }, []);
 
-  useEffect(() => {
-    fetchLeaderboard();
-  }, [fetchLeaderboard]);
+  useEffect(() => { fetchLeaderboard(); }, [fetchLeaderboard]);
 
-  useEffect(() => {
-    if (!running) return;
-    const id = setInterval(() => setTime((t) => t + 1), 1000);
-    return () => clearInterval(id);
-  }, [running]);
-
-  const startNew = useCallback(() => {
-    setTiles(shuffle(createSolved()));
-    setMoves(0);
-    setWon(false);
-    setTime(0);
-    setRunning(true);
-    setShowNameInput(false);
+  const startGame = useCallback(() => {
+    const initSnake = [{ x: 10, y: 10 }];
+    const initFood = randomFood(initSnake);
+    snakeRef.current = initSnake;
+    foodRef.current = initFood;
+    dirRef.current = "RIGHT";
+    scoreRef.current = 0;
+    setSnake(initSnake);
+    setFood(initFood);
+    setDir("RIGHT");
+    setScore(0);
+    setStatus("running");
+    statusRef.current = "running";
+    setShowName(false);
     setSaved(false);
   }, []);
 
+  // Game loop
   useEffect(() => {
-    startNew();
-  }, [startNew]);
+    if (status !== "running") return;
+    const id = setInterval(() => {
+      const s = snakeRef.current;
+      const d = dirRef.current;
+      const head = s[0];
+      const next: Point = {
+        x: d === "LEFT" ? head.x - 1 : d === "RIGHT" ? head.x + 1 : head.x,
+        y: d === "UP" ? head.y - 1 : d === "DOWN" ? head.y + 1 : head.y,
+      };
 
-  const move = useCallback(
-    (index: number) => {
-      if (won) return;
-      const blank = tiles.indexOf(0);
-      const row = Math.floor(index / SIZE);
-      const col = index % SIZE;
-      const bRow = Math.floor(blank / SIZE);
-      const bCol = blank % SIZE;
-      const adjacent =
-        (Math.abs(row - bRow) === 1 && col === bCol) ||
-        (Math.abs(col - bCol) === 1 && row === bRow);
-      if (!adjacent) return;
-      const next = [...tiles];
-      [next[blank], next[index]] = [next[index], next[blank]];
-      setTiles(next);
-      setMoves((m) => m + 1);
-      if (isSolved(next)) {
-        setWon(true);
-        setRunning(false);
-        setShowNameInput(true);
+      if (
+        next.x < 0 || next.x >= COLS ||
+        next.y < 0 || next.y >= ROWS ||
+        s.some((p) => p.x === next.x && p.y === next.y)
+      ) {
+        setStatus("dead");
+        statusRef.current = "dead";
+        setShowName(true);
+        return;
       }
-    },
-    [tiles, won]
-  );
+
+      const ate = next.x === foodRef.current.x && next.y === foodRef.current.y;
+      const newSnake = ate ? [next, ...s] : [next, ...s.slice(0, -1)];
+      snakeRef.current = newSnake;
+
+      if (ate) {
+        const newFood = randomFood(newSnake);
+        foodRef.current = newFood;
+        scoreRef.current += 1;
+        setFood(newFood);
+        setScore((sc) => {
+          const next = sc + 1;
+          setBest((b) => Math.max(b, next));
+          return next;
+        });
+      }
+
+      setSnake([...newSnake]);
+    }, TICK);
+    return () => clearInterval(id);
+  }, [status]);
+
+  // Keyboard
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const map: Record<string, Dir> = {
+        ArrowUp: "UP", ArrowDown: "DOWN",
+        ArrowLeft: "LEFT", ArrowRight: "RIGHT",
+        w: "UP", s: "DOWN", a: "LEFT", d: "RIGHT",
+      };
+      const newDir = map[e.key];
+      if (!newDir) return;
+      e.preventDefault();
+      if (statusRef.current === "idle" || statusRef.current === "dead") {
+        startGame();
+        return;
+      }
+      if (newDir !== OPPOSITE[dirRef.current]) {
+        dirRef.current = newDir;
+        setDir(newDir);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [startGame]);
 
   const saveScore = async () => {
     if (!playerName.trim()) return;
     setSaving(true);
     await supabase.from("leaderboard").insert({
       name: playerName.trim(),
-      moves,
-      time_seconds: time,
+      moves: scoreRef.current,
+      time_seconds: 0,
     });
     setSaving(false);
     setSaved(true);
-    setShowNameInput(false);
+    setShowName(false);
     fetchLeaderboard();
     setShowLeaderboard(true);
   };
 
+  // Mobile controls
+  const swipe = (d: Dir) => {
+    if (statusRef.current === "idle" || statusRef.current === "dead") {
+      startGame();
+      return;
+    }
+    if (d !== OPPOSITE[dirRef.current]) {
+      dirRef.current = d;
+      setDir(d);
+    }
+  };
+
   return (
     <main
-      className="min-h-screen flex flex-col items-center justify-center p-4 relative"
-      style={{
-        backgroundImage: `url('${BG_URL}')`,
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-      }}
+      className="min-h-screen flex flex-col items-center justify-center p-4 relative select-none"
+      style={{ backgroundImage: `url('${BG_URL}')`, backgroundSize: "cover", backgroundPosition: "center" }}
     >
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
+      <div className="absolute inset-0 bg-black/65 backdrop-blur-[2px]" />
 
       <div className="relative z-10 flex flex-col items-center w-full max-w-md">
-        <h1 className="text-4xl font-bold text-white mb-1 tracking-tight drop-shadow-lg">
-          Пятнашки
-        </h1>
-        <p className="text-blue-200 mb-6 text-xs">Астана · ЛРТ</p>
+        <h1 className="text-4xl font-bold text-white mb-1 tracking-tight drop-shadow-lg">Змейка</h1>
+        <p className="text-blue-200 mb-4 text-xs">Астана · ЛРТ</p>
 
         {/* Stats */}
-        <div className="flex gap-8 mb-6 text-center">
+        <div className="flex gap-10 mb-4 text-center">
           <div>
-            <div className="text-2xl font-bold text-white">{moves}</div>
-            <div className="text-blue-300 text-xs uppercase tracking-widest">Ходов</div>
+            <div className="text-2xl font-bold text-white">{score}</div>
+            <div className="text-blue-300 text-xs uppercase tracking-widest">Счёт</div>
           </div>
           <div>
-            <div className="text-2xl font-bold text-white">{fmt(time)}</div>
-            <div className="text-blue-300 text-xs uppercase tracking-widest">Время</div>
+            <div className="text-2xl font-bold text-yellow-300">{best}</div>
+            <div className="text-blue-300 text-xs uppercase tracking-widest">Рекорд</div>
           </div>
         </div>
 
         {/* Board */}
         <div
-          className="grid gap-2 p-3 bg-black/30 backdrop-blur-md rounded-2xl shadow-2xl border border-white/10"
-          style={{ gridTemplateColumns: `repeat(${SIZE}, 1fr)` }}
+          className="relative bg-black/40 backdrop-blur-sm rounded-2xl border border-white/10 shadow-2xl overflow-hidden"
+          style={{ width: COLS * CELL, height: ROWS * CELL }}
         >
-          {tiles.map((tile, i) => (
-            <button
+          {/* Grid lines */}
+          <svg className="absolute inset-0 opacity-10" width={COLS * CELL} height={ROWS * CELL}>
+            {Array.from({ length: COLS + 1 }).map((_, i) => (
+              <line key={`v${i}`} x1={i * CELL} y1={0} x2={i * CELL} y2={ROWS * CELL} stroke="white" strokeWidth="0.5" />
+            ))}
+            {Array.from({ length: ROWS + 1 }).map((_, i) => (
+              <line key={`h${i}`} x1={0} y1={i * CELL} x2={COLS * CELL} y2={i * CELL} stroke="white" strokeWidth="0.5" />
+            ))}
+          </svg>
+
+          {/* Snake */}
+          {snake.map((p, i) => (
+            <div
               key={i}
-              onClick={() => move(i)}
-              disabled={tile === 0}
-              className={`
-                w-16 h-16 sm:w-20 sm:h-20 rounded-xl font-bold text-xl sm:text-2xl
-                transition-all duration-100 select-none
-                ${
-                  tile === 0
-                    ? "bg-transparent cursor-default"
-                    : "bg-white/20 backdrop-blur-sm text-white shadow-lg border border-white/30 hover:bg-white/30 hover:scale-105 active:scale-95 cursor-pointer"
-                }
-              `}
-            >
-              {tile !== 0 ? tile : ""}
-            </button>
+              className="absolute rounded-sm transition-none"
+              style={{
+                left: p.x * CELL + 1,
+                top: p.y * CELL + 1,
+                width: CELL - 2,
+                height: CELL - 2,
+                background: i === 0
+                  ? "linear-gradient(135deg, #34d399, #10b981)"
+                  : `hsl(${160 - i * 2}, 70%, ${55 - i * 0.5}%)`,
+              }}
+            />
           ))}
+
+          {/* Food */}
+          <div
+            className="absolute rounded-full animate-pulse"
+            style={{
+              left: food.x * CELL + 3,
+              top: food.y * CELL + 3,
+              width: CELL - 6,
+              height: CELL - 6,
+              background: "radial-gradient(circle, #f87171, #ef4444)",
+            }}
+          />
+
+          {/* Overlay: idle / dead */}
+          {status !== "running" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 backdrop-blur-sm">
+              {status === "dead" && (
+                <p className="text-red-400 font-bold text-2xl mb-1">Игра окончена</p>
+              )}
+              {status === "dead" && (
+                <p className="text-white/60 text-sm mb-4">Счёт: {score}</p>
+              )}
+              <button
+                onClick={startGame}
+                className="px-6 py-2 bg-green-500 hover:bg-green-400 text-white font-bold rounded-xl transition-all active:scale-95"
+              >
+                {status === "idle" ? "Начать игру" : "Играть снова"}
+              </button>
+              <p className="text-white/30 text-xs mt-3">или нажмите любую стрелку</p>
+            </div>
+          )}
         </div>
 
-        {/* Win banner */}
-        {won && (
-          <div className="mt-6 w-full px-6 py-4 bg-green-500/20 backdrop-blur-sm border border-green-400/40 rounded-2xl text-center">
-            <div className="text-2xl font-bold text-green-300">Победа!</div>
-            <div className="text-green-400 text-sm mt-1">
-              {moves} ходов · {fmt(time)}
-            </div>
+        {/* Mobile controls */}
+        <div className="mt-4 grid grid-cols-3 gap-1 w-32">
+          <div />
+          <button onClick={() => swipe("UP")} className="py-2 bg-white/10 hover:bg-white/20 rounded-lg text-white text-lg active:scale-95 transition-all">↑</button>
+          <div />
+          <button onClick={() => swipe("LEFT")} className="py-2 bg-white/10 hover:bg-white/20 rounded-lg text-white text-lg active:scale-95 transition-all">←</button>
+          <button onClick={() => swipe("DOWN")} className="py-2 bg-white/10 hover:bg-white/20 rounded-lg text-white text-lg active:scale-95 transition-all">↓</button>
+          <button onClick={() => swipe("RIGHT")} className="py-2 bg-white/10 hover:bg-white/20 rounded-lg text-white text-lg active:scale-95 transition-all">→</button>
+        </div>
 
-            {/* Save score form */}
-            {showNameInput && (
-              <div className="mt-4 flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Ваше имя"
-                  value={playerName}
-                  onChange={(e) => setPlayerName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && saveScore()}
-                  maxLength={20}
-                  className="flex-1 px-3 py-2 rounded-lg bg-white/10 border border-white/20 text-white placeholder-white/40 text-sm focus:outline-none focus:border-green-400"
-                />
-                <button
-                  onClick={saveScore}
-                  disabled={saving || !playerName.trim()}
-                  className="px-4 py-2 bg-green-500 hover:bg-green-400 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-all"
-                >
-                  {saving ? "..." : "Сохранить"}
-                </button>
-              </div>
-            )}
-            {saved && (
-              <p className="mt-2 text-green-300 text-sm">Результат сохранён!</p>
-            )}
+        {/* Save score */}
+        {showName && (
+          <div className="mt-4 w-full flex gap-2">
+            <input
+              type="text"
+              placeholder="Ваше имя"
+              value={playerName}
+              onChange={(e) => setPlayerName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && saveScore()}
+              maxLength={20}
+              className="flex-1 px-3 py-2 rounded-lg bg-white/10 border border-white/20 text-white placeholder-white/40 text-sm focus:outline-none focus:border-green-400"
+            />
+            <button
+              onClick={saveScore}
+              disabled={saving || !playerName.trim()}
+              className="px-4 py-2 bg-green-500 hover:bg-green-400 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-all"
+            >
+              {saving ? "..." : "Сохранить"}
+            </button>
           </div>
         )}
+        {saved && <p className="mt-2 text-green-300 text-sm">Результат сохранён!</p>}
 
-        {/* Buttons */}
-        <div className="mt-6 flex gap-3">
-          <button
-            onClick={startNew}
-            className="px-6 py-3 bg-white/20 hover:bg-white/30 backdrop-blur-sm active:scale-95 text-white font-semibold rounded-xl transition-all shadow-lg border border-white/20"
-          >
-            Новая игра
-          </button>
-          <button
-            onClick={() => { setShowLeaderboard((v) => !v); fetchLeaderboard(); }}
-            className="px-6 py-3 bg-yellow-500/20 hover:bg-yellow-500/30 backdrop-blur-sm active:scale-95 text-yellow-200 font-semibold rounded-xl transition-all shadow-lg border border-yellow-400/20"
-          >
-            Рекорды
-          </button>
-        </div>
+        {/* Leaderboard button */}
+        <button
+          onClick={() => { setShowLeaderboard((v) => !v); fetchLeaderboard(); }}
+          className="mt-4 px-6 py-2 bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-200 font-semibold rounded-xl border border-yellow-400/20 transition-all active:scale-95 text-sm"
+        >
+          Рекорды
+        </button>
 
         {/* Leaderboard */}
         {showLeaderboard && (
-          <div className="mt-6 w-full bg-black/40 backdrop-blur-md rounded-2xl border border-white/10 overflow-hidden">
+          <div className="mt-4 w-full bg-black/40 backdrop-blur-md rounded-2xl border border-white/10 overflow-hidden">
             <div className="px-4 py-3 border-b border-white/10">
-              <h2 className="text-white font-bold text-lg">Таблица рекордов</h2>
+              <h2 className="text-white font-bold">Таблица рекордов</h2>
             </div>
             {leaderboard.length === 0 ? (
-              <p className="text-white/40 text-sm text-center py-6">
-                Рекордов пока нет — будьте первым!
-              </p>
+              <p className="text-white/40 text-sm text-center py-6">Рекордов пока нет!</p>
             ) : (
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-white/40 text-xs uppercase">
                     <th className="px-4 py-2 text-left">#</th>
                     <th className="px-4 py-2 text-left">Имя</th>
-                    <th className="px-4 py-2 text-right">Ходов</th>
-                    <th className="px-4 py-2 text-right">Время</th>
+                    <th className="px-4 py-2 text-right">Счёт</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {leaderboard.map((entry, i) => (
-                    <tr
-                      key={entry.id}
-                      className="border-t border-white/5 text-white"
-                    >
+                  {leaderboard.map((e, i) => (
+                    <tr key={e.id} className="border-t border-white/5 text-white">
                       <td className="px-4 py-2 text-white/40">{i + 1}</td>
-                      <td className="px-4 py-2 font-medium">{entry.name}</td>
-                      <td className="px-4 py-2 text-right">{entry.moves}</td>
-                      <td className="px-4 py-2 text-right">{fmt(entry.time_seconds)}</td>
+                      <td className="px-4 py-2 font-medium">{e.name}</td>
+                      <td className="px-4 py-2 text-right">{e.moves}</td>
                     </tr>
                   ))}
                 </tbody>
